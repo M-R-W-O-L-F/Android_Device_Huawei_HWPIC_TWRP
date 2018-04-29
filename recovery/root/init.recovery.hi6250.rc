@@ -1,0 +1,55 @@
+import /init.recovery.hi6250.usb.rc
+
+on init
+    symlink /dev/block/platform/hi_mci.0 /dev/block/bootdevice
+    write /sys/module/hisi_nve/parameters/nve /dev/block/bootdevice/by-name/nvme
+    wait /dev/block/bootdevice/by-name/oeminfo
+
+    start oeminfo_nvm
+    install_keyring
+    start teecd
+
+on boot
+    start vold_recovery
+
+on post-fs-data
+    mkdir /system
+    mkdir /vendor
+    mkdir /data
+
+service hw_service /sbin/hw_service
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+service teecd /sbin/teecd
+    socket tee-multi-user stream 660 root system
+    user root
+    group root readproc
+    seclabel u:r:tee:s0
+    disabled
+
+service vold_recovery /system/bin/vold \
+        --blkid_context=u:r:blkid:s0 --blkid_untrusted_context=u:r:blkid_untrusted:s0 \
+        --fsck_context=u:r:fsck:s0 --fsck_untrusted_context=u:r:fsck_untrusted:s0
+    socket vold stream 0660 root mount
+    socket cryptd stream 0660 root mount
+    socket cryptd2 stream 0660 root mount
+    ioprio be 2
+    writepid /dev/cpuset/foreground/tasks
+    seclabel u:r:tee:s0
+    oneshot
+    disabled
+
+service oeminfo_nvm /sbin/oeminfo_nvm_server
+    ioprio rt 4
+    seclabel u:r:recovery:s0
+
+service decrypt /sbin/decrypt.sh
+    seclabel u:r:tee:s0
+    oneshot
+    disabled
+
+on property:init.svc.vold_recovery=running
+    start decrypt
+
